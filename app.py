@@ -125,11 +125,6 @@ def p_usage_line(input_date):
   )
   return(fig)
 
-st.write(f"Total Home Plan Costs: **${data_daily['home_plan_costs'].sum() / 100:.2f}**")
-st.write(f"Total Midday Saver Costs: **${data_daily['midday_saver_costs'].sum() / 100:.2f}**")
-st.write(f"Total Electric Vehicle Add-On Costs: **${data_daily['electric_vehicle_add_on_costs'].sum() / 100:.2f}**")
-st.write(f"Total Feed-In Tariff: **${data_daily['debs_feed_in_tariff'].sum() / 100:.2f}**")
-st.write(f"Opportunity Cost from Self-Consumption: **${(data_daily['self_consumption'] * (32.3719 - 2)).sum() / 100:.2f}**")
 
 # Add input for date selection
 with st.container(
@@ -146,79 +141,96 @@ with st.container(
     st.plotly_chart(p_usage_line(input_date.strftime('%Y-%m-%d')))
 
 # Use plotly to plot line charts for costs ####
-fig_costs = go.Figure()
-fig_costs.add_trace(go.Scatter(x=data_daily['date'], y=data_daily['home_plan_costs'],
-                               name='Home Plan Costs', line=dict(color='blue')))
-fig_costs.add_trace(go.Scatter(x=data_daily['date'], y=data_daily['midday_saver_costs'],
-                               name='Midday Saver Costs', line=dict(color='orange')))
-fig_costs.add_trace(go.Scatter(x=data_daily['date'], y=data_daily['electric_vehicle_add_on_costs'],
-                               name='EV Add-On Costs', line=dict(color='green')))
-fig_costs.update_layout(title="Daily Electricity Costs",
-                        xaxis_title="Date", yaxis_title="Cost (in currency units)",
-                        legend=dict(x=0.1, y=0.9), hovermode='x')
-st.plotly_chart(fig_costs)
+with st.container(border=True):
+  input_date_range = st.date_input(
+    "Select a date range to view costs",
+    value=(data_daily['date'].min(), data_daily['date'].max())
+  )
+  
+  data_daily_filtered = data_daily[
+    (data_daily['date'] >= pd.to_datetime(input_date_range[0])) &
+    (data_daily['date'] <= pd.to_datetime(input_date_range[1]))
+  ]
 
-# Use plotly to plot stacked bar chart for from_grid, and self_consumption ####
-fig_usage = go.Figure()
-fig_usage.add_trace(go.Bar(x=data_daily['date'], y=data_daily['from_grid'],
-                           name='From Grid', marker_color='blue'))
-fig_usage.add_trace(go.Bar(x=data_daily['date'], y=data_daily['self_consumption'],
-                           name='Self Consumption', marker_color='green'))
-fig_usage.add_trace(go.Bar(x=data_daily['date'], y=-data_daily['to_grid'],
-                           name='To Grid', marker_color='orange'))
-fig_usage.add_trace(go.Scatter(x=data_daily['date'], y=[-16]*len(data_daily),
-                               name='Battery Max Charge', line=dict(color='red', dash='dash')))
-fig_usage.update_layout(title="Daily Energy Flow",
-                        xaxis_title="Date", yaxis_title="Energy (kWh)",
-                        barmode='relative', legend=dict(x=0.1, y=0.9), hovermode='x')
-st.plotly_chart(fig_usage)
+  st.write(f"Total Home Plan Costs: **${data_daily_filtered ['home_plan_costs'].sum() / 100:.2f}**")
+  st.write(f"Total Midday Saver Costs: **${data_daily_filtered['midday_saver_costs'].sum() / 100:.2f}**")
+  st.write(f"Total Electric Vehicle Add-On Costs: **${data_daily_filtered['electric_vehicle_add_on_costs'].sum() / 100:.2f}**")
+  st.write(f"Total Feed-In Tariff: **${data_daily_filtered['debs_feed_in_tariff'].sum() / 100:.2f}**")
+  st.write(f"Opportunity Cost from Self-Consumption: **${(data_daily_filtered['self_consumption'] * (32.3719 - 2)).sum() / 100:.2f}**")
 
-# Use plotly to plot 100% stacked bar chart for from_grid, and self_consumption ####
-fig_usage_pct = go.Figure()
-fig_usage_pct.add_trace(go.Bar(
-    x=data_daily['date'],
-    y=(data_daily['from_grid'] / data_daily['total_usage']) * 100,
-    name='From Grid', marker_color='blue'))
-fig_usage_pct.add_trace(go.Bar(
-    x=data_daily['date'],
-    y=(data_daily['self_consumption'] / data_daily['total_usage']) * 100,
-    name='Self Consumption', marker_color='green'))
-fig_usage_pct.update_layout(title="Daily Energy Flow (Percentage)",
-                            xaxis_title="Date", yaxis_title="Percentage (%)",
-                            barmode='relative', legend=dict(x=0.1, y=0.9), hovermode='x')
-st.plotly_chart(fig_usage_pct)
-
-# Use plotly to plot stacked bar chart for to_grid and self_consumption relative to sig_solar_production ####
-fig_solar = go.Figure()
-fig_solar.add_trace(go.Bar(x=data_daily['date'], y=data_daily['to_grid'],
-                           name='To Grid', marker_color='orange'))
-fig_solar.add_trace(go.Bar(x=data_daily['date'], y=data_daily['self_consumption'],
-                           name='Self Consumption', marker_color='green'))
-fig_solar.update_layout(title="Daily Solar Production Flow",
-                        xaxis_title="Date", yaxis_title="Energy (kWh)",
-                        barmode='relative', legend=dict(x=0.1, y=0.9), hovermode='x')
-st.plotly_chart(fig_solar)
-
-# Use plotly to plot 100% stacked bar chart for to_grid and self_consumption relative to sig_solar_production ####
-fig_solar_pct = go.Figure()
-fig_solar_pct.add_trace(go.Bar(
-    x=data_daily['date'],
-    y=(data_daily['to_grid'] / data_daily['sig_solar_production']) * 100,
-    name='To Grid', marker_color='orange'))
-fig_solar_pct.add_trace(go.Bar(
-    x=data_daily['date'],
-    y=(data_daily['self_consumption'] / data_daily['sig_solar_production']) * 100,
-    name='Self Consumption', marker_color='green'))
-fig_solar_pct.update_layout(title="Daily Solar Production Flow (Percentage)",
-                            xaxis_title="Date", yaxis_title="Percentage (%)",
-                            barmode='relative', legend=dict(x=0.1, y=0.9), hovermode='x')
-st.plotly_chart(fig_solar_pct)
-
-# Use plotly to plot bar chart of to_grid ####
-fig_to_grid = go.Figure()
-fig_to_grid.add_trace(go.Bar(x=data_daily['date'], y=data_daily['to_grid'],
-                             name='To Grid', marker_color='orange'))
-fig_to_grid.update_layout(title="Daily Energy Sent to Grid",
-                          xaxis_title="Date", yaxis_title="Energy (kWh)",
+  fig_costs = go.Figure()
+  fig_costs.add_trace(go.Scatter(x=data_daily_filtered['date'], y=data_daily_filtered['home_plan_costs'],
+                                name='Home Plan Costs', line=dict(color='blue')))
+  fig_costs.add_trace(go.Scatter(x=data_daily_filtered['date'], y=data_daily_filtered['midday_saver_costs'],
+                                name='Midday Saver Costs', line=dict(color='orange')))
+  fig_costs.add_trace(go.Scatter(x=data_daily_filtered['date'], y=data_daily_filtered['electric_vehicle_add_on_costs'],
+                                name='EV Add-On Costs', line=dict(color='green')))
+  fig_costs.update_layout(title="Daily Electricity Costs",
+                          xaxis_title="Date", yaxis_title="Cost (in currency units)",
                           legend=dict(x=0.1, y=0.9), hovermode='x')
-st.plotly_chart(fig_to_grid)
+  st.plotly_chart(fig_costs)
+
+  # Use plotly to plot stacked bar chart for from_grid, and self_consumption ####
+  fig_usage = go.Figure()
+  fig_usage.add_trace(go.Bar(x=data_daily_filtered['date'], y=data_daily_filtered['from_grid'],
+                            name='From Grid', marker_color='blue'))
+  fig_usage.add_trace(go.Bar(x=data_daily_filtered['date'], y=data_daily_filtered['self_consumption'],
+                            name='Self Consumption', marker_color='green'))
+  fig_usage.add_trace(go.Bar(x=data_daily_filtered['date'], y=-data_daily_filtered['to_grid'],
+                            name='To Grid', marker_color='orange'))
+  fig_usage.add_trace(go.Scatter(x=data_daily_filtered['date'], y=[-16]*len(data_daily_filtered),
+                                name='Battery Max Charge', line=dict(color='red', dash='dash')))
+  fig_usage.update_layout(title="Daily Energy Flow",
+                          xaxis_title="Date", yaxis_title="Energy (kWh)",
+                          barmode='relative', legend=dict(x=0.1, y=0.9), hovermode='x')
+  st.plotly_chart(fig_usage)
+
+  # Use plotly to plot 100% stacked bar chart for from_grid, and self_consumption ####
+  fig_usage_pct = go.Figure()
+  fig_usage_pct.add_trace(go.Bar(
+      x=data_daily_filtered['date'],
+      y=(data_daily_filtered['from_grid'] / data_daily_filtered['total_usage']) * 100,
+      name='From Grid', marker_color='blue'))
+  fig_usage_pct.add_trace(go.Bar(
+      x=data_daily_filtered['date'],
+      y=(data_daily_filtered['self_consumption'] / data_daily_filtered['total_usage']) * 100,
+      name='Self Consumption', marker_color='green'))
+  fig_usage_pct.update_layout(title="Daily Energy Flow (Percentage)",
+                              xaxis_title="Date", yaxis_title="Percentage (%)",
+                              barmode='relative', legend=dict(x=0.1, y=0.9), hovermode='x')
+  st.plotly_chart(fig_usage_pct)
+
+  # Use plotly to plot stacked bar chart for to_grid and self_consumption relative to sig_solar_production ####
+  fig_solar = go.Figure()
+  fig_solar.add_trace(go.Bar(x=data_daily_filtered['date'], y=data_daily_filtered['to_grid'],
+                            name='To Grid', marker_color='orange'))
+  fig_solar.add_trace(go.Bar(x=data_daily_filtered['date'], y=data_daily_filtered['self_consumption'],
+                            name='Self Consumption', marker_color='green'))
+  fig_solar.update_layout(title="Daily Solar Production Flow",
+                          xaxis_title="Date", yaxis_title="Energy (kWh)",
+                          barmode='relative', legend=dict(x=0.1, y=0.9), hovermode='x')
+  st.plotly_chart(fig_solar)
+
+  # Use plotly to plot 100% stacked bar chart for to_grid and self_consumption relative to sig_solar_production ####
+  fig_solar_pct = go.Figure()
+  fig_solar_pct.add_trace(go.Bar(
+      x=data_daily_filtered['date'],
+      y=(data_daily_filtered['to_grid'] / data_daily_filtered['sig_solar_production']) * 100,
+      name='To Grid', marker_color='orange'))
+  fig_solar_pct.add_trace(go.Bar(
+      x=data_daily_filtered['date'],
+      y=(data_daily_filtered['self_consumption'] / data_daily_filtered['sig_solar_production']) * 100,
+      name='Self Consumption', marker_color='green'))
+  fig_solar_pct.update_layout(title="Daily Solar Production Flow (Percentage)",
+                              xaxis_title="Date", yaxis_title="Percentage (%)",
+                              barmode='relative', legend=dict(x=0.1, y=0.9), hovermode='x')
+  st.plotly_chart(fig_solar_pct)
+
+  # Use plotly to plot bar chart of to_grid ####
+  fig_to_grid = go.Figure()
+  fig_to_grid.add_trace(go.Bar(x=data_daily_filtered['date'], y=data_daily_filtered['to_grid'],
+                              name='To Grid', marker_color='orange'))
+  fig_to_grid.update_layout(title="Daily Energy Sent to Grid",
+                            xaxis_title="Date", yaxis_title="Energy (kWh)",
+                            legend=dict(x=0.1, y=0.9), hovermode='x')
+  st.plotly_chart(fig_to_grid)
