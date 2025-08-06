@@ -1,5 +1,6 @@
 import streamlit as st
 import plotly.graph_objects as go
+import streamlit_nested_layout
 
 st.title("Synergy Half Hourly Data Analysis")
 st.markdown("This app allows you to upload Synergy half hourly data and Sigenergy solar data, and visualize the energy usage, generation, and costs associated with different plans.")
@@ -16,7 +17,10 @@ with st.expander("**Input Synergy and Sigenergy Data**"):
     data_list = [pd.read_csv(f, skiprows=5) for f in uploaded_synergy_files]
     data = pd.concat(data_list, ignore_index=True).drop_duplicates()
     
-    st.write(data)
+    # Wrap this in a collapsed box
+    with st.expander("View Data"):
+      # Display the DataFrame
+      st.write(data)
 
   uploaded_sigenergy_file = st.file_uploader(
     label = "Upload Sigenergy Solar Data File",
@@ -27,7 +31,10 @@ with st.expander("**Input Synergy and Sigenergy Data**"):
     # Read the solar data file into a DataFrame
     solar = pd.read_excel(uploaded_sigenergy_file, sheet_name=0)
 
-    st.write(solar)
+    # Wrap this in a collapsed box
+    with st.expander("View Solar Data"):
+      # Display the DataFrame
+      st.write(solar)
   
 @st.cache_data(show_spinner=False)
 def process_data(data, solar):
