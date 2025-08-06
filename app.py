@@ -1,11 +1,11 @@
 import streamlit as st
 import plotly.graph_objects as go
-import streamlit_nested_layout
 
 st.title("Synergy Half Hourly Data Analysis")
 st.markdown("This app allows you to upload Synergy half hourly data and Sigenergy solar data, and visualize the energy usage, generation, and costs associated with different plans.")
 
-with st.expander("**Input Synergy and Sigenergy Data**"):
+with st.container(border=True):
+  st.header("Input Synergy and Sigenergy Data")
   # Import a file uploader
   uploaded_synergy_files = st.file_uploader(
     label = "Upload Synergy Half Hourly Data File(s)",
@@ -107,6 +107,8 @@ def process_data(data, solar):
   return data, data_daily
 
 data, data_daily = process_data(data, solar)
+
+st.header("Overview of Energy Usage and Costs")
 
 # Plotting functions
 def p_usage_line(input_date):
