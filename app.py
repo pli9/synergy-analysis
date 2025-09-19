@@ -14,32 +14,42 @@ with st.container(border=True):
     type=["csv"]
   )
   if len(uploaded_synergy_files) > 0:
-    data_list = [pd.read_csv(f, skiprows=5) for f in uploaded_synergy_files]
-    data = pd.concat(data_list, ignore_index=True).drop_duplicates()
+    synergy_list = [pd.read_csv(f, skiprows=5) for f in uploaded_synergy_files]
+    synergy = pd.concat(synergy_list, ignore_index=True).drop_duplicates()
     
     # Wrap this in a collapsed box
     with st.expander("View Data"):
       # Display the DataFrame
-      st.write(data)
+      st.write(synergy)
 
   uploaded_sigenergy_file = st.file_uploader(
-    label = "Upload Sigenergy Solar Data File",
+    label = "Upload Sigenergy Data File",
     accept_multiple_files=True,
     type=["xlsx"]
   )
 
   if len(uploaded_sigenergy_file) > 0:
     # Read the solar data file into a DataFrame
-    solar_list = [pd.read_excel(f, sheet_name=0) for f in uploaded_sigenergy_file]
-    solar = pd.concat(solar_list, ignore_index=True).drop_duplicates()
+    sigenergy_list = [pd.read_excel(f, sheet_name=0) for f in uploaded_sigenergy_file]
+    sigenergy = pd.concat(sigenergy_list, ignore_index=True).drop_duplicates()
 
     # Wrap this in a collapsed box
-    with st.expander("View Solar Data"):
+    with st.expander("View Sigenergy Data"):
       # Display the DataFrame
-      st.write(solar)
-  
+      st.write(sigenergy_list)
+
 @st.cache_data(show_spinner=False)
-def process_data(data, solar):
+def process_synergy_data(data):
+  # Check if column "Usage already billed" exists
+  if "Usage already billed" not in data.columns:
+    data["Usage already billed"] = 0
+    
+  if "Usage not yet billed" not in data.columns:
+    data["Usage not yet billed"] = 0
+    
+  # Reorder columns
+  data = data[['Date', 'Time', 'Usage already billed', 'Usage not yet billed', 'Generation', 'Meter reading status']]
+
   # Rename columns
   data.columns = ['date', 'time', 'usage_1', 'usage_2', 'generation', 'meter_reading_status']
   data.fillna({'usage_1': 0, 'usage_2': 0}, inplace=True)
@@ -47,9 +57,9 @@ def process_data(data, solar):
   data = data[['date', 'time', 'syn_usage', 'generation']].rename(columns={'generation': 'syn_generation'})
 
   # Format date
-  data['date'] = pd.to_datetime(data['date'], format="%d/%m/%Y")
+  data.loc[:, 'date'] = pd.to_datetime(data['date'], format="%d/%m/%Y")
   # Fix times that are 4 digits long (e.g., '0:30' to '00:30')
-  data['time'] = [f"0{t}" if len(t)==4 else t for t in data['time']]
+  data.loc[:, 'time'] = [f"0{t}" if len(t)==4 else t for t in data['time']]
   # Sort by date and time
   data.sort_values(['date', 'time'], inplace=True)
 
@@ -69,56 +79,58 @@ def process_data(data, solar):
       'debs': [2]*30 + [10]*12 + [2]*6,
     }
   )
-  tou_costs['time'] = tou_costs['time'].apply(lambda x: x if len(x)==5 else '0'+x)
+  tou_costs.loc[:, 'time'] = tou_costs['time'].apply(lambda x: x if len(x)==5 else '0'+x)
 
   # Merge TOU costs
   data = data.merge(tou_costs, on='time', how='left')
 
   # Calculate cost columns
-  data['home_plan_costs'] = data['home_plan'] * data['syn_usage']
-  data['midday_saver_costs'] = data['midday_saver'] * data['syn_usage']
-  data['electric_vehicle_add_on_costs'] = data['electric_vehicle_add_on'] * data['syn_usage']
-  data['debs_feed_in_tariff'] = data['debs'] * data['syn_generation']
+  data.loc[:, 'home_plan_costs'] = data['home_plan'] * data['syn_usage']
+  data.loc[:, 'midday_saver_costs'] = data['midday_saver'] * data['syn_usage']
+  data.loc[:, 'electric_vehicle_add_on_costs'] = data['electric_vehicle_add_on'] * data['syn_usage']
+  data.loc[:, 'debs_feed_in_tariff'] = data['debs'] * data['syn_generation']
 
   # Daily aggregation
   data_daily = data.groupby('date').agg({
-      'syn_usage': 'sum',
-      'syn_generation': 'sum',
-      'home_plan_costs': 'sum',
-      'midday_saver_costs': 'sum',
-      'electric_vehicle_add_on_costs': 'sum',
-      'debs_feed_in_tariff': 'sum'
+    'syn_usage': 'sum',
+    'syn_generation': 'sum',
+    'home_plan_costs': 'sum',
+    'midday_saver_costs': 'sum',
+    'electric_vehicle_add_on_costs': 'sum',
+    'debs_feed_in_tariff': 'sum'
   }).reset_index()
 
   # Add supply charges
   for plan in ['home_plan', 'midday_saver', 'electric_vehicle_add_on']:
-      charge = supply_charge.loc[supply_charge['plan'] == plan, 'supply_charge'].values[0]
-      data_daily[f'{plan}_costs'] += charge
-
-  # Load solar data
-  solar = solar[['Date', 'Daily Solar Production (kWh)', 'Daily Consumption (kWh)', 'Daily From Grid (kWh)', 'Daily To Grid (kWh)']]
-  solar.columns = ['date', 'sig_solar_production', 'sig_consumption', 'sig_from_grid', 'sig_to_grid']
-  solar['date'] = pd.to_datetime(solar['date'].astype(str), format='%Y%m%d')
-
-  # Merge with daily data
-  data_daily = pd.merge(data_daily, solar, on='date', how='left')
-
-  # Calculations
-  data_daily['from_grid'] = data_daily['syn_usage']
-  data_daily['to_grid'] = data_daily['syn_generation']
-  data_daily['self_consumption'] = data_daily['sig_solar_production'] - data_daily['syn_generation']
-  data_daily['total_usage'] = data_daily['from_grid'] + data_daily['self_consumption']
+    charge = supply_charge.loc[supply_charge['plan'] == plan, 'supply_charge'].values[0]
+    data_daily[f'{plan}_costs'] += charge
 
   return data, data_daily
 
+@st.cache_data(show_spinner=False)
+def process_sigenergy_data(data):
+  # Load solar data
+  data = data[['Date', 'Daily Solar Production (kWh)', 'Daily Consumption (kWh)', 'Daily From Grid (kWh)', 'Daily To Grid (kWh)']]
+  data.columns = ['date', 'sig_solar_production', 'sig_consumption', 'sig_from_grid', 'sig_to_grid']
+  data['date'] = pd.to_datetime(data['date'].astype(str), format='%Y%m%d')
+
+  # Calculations
+  data.loc[:, 'from_grid'] = data['sig_from_grid']
+  data.loc[:, 'to_grid'] = data['sig_to_grid']
+  data.loc[:, 'self_consumption'] = data['sig_consumption'] - data['sig_from_grid']
+  data.loc[:, 'total_usage'] = data['sig_consumption']
+  
+  return data
+
 if len(uploaded_synergy_files) > 0 and len(uploaded_sigenergy_file) > 0:
-  data, data_daily = process_data(data, solar)
+  data_synergy_halfhour, data_synergy_daily = process_synergy_data(synergy)
+  data_sigenergy_daily = process_sigenergy_data(sigenergy)
 
   st.header("Overview of Energy Usage and Costs")
 
   # Plotting functions
   def p_usage_line(input_date):
-    plot_data = data[data['date'] == pd.to_datetime(input_date)]
+    plot_data = data_synergy_halfhour[data_synergy_halfhour['date'] == pd.to_datetime(input_date)]
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=plot_data['time'], y=plot_data['syn_usage'], mode='lines', name='From Grid', line=dict(color='blue')))
     fig.add_trace(go.Scatter(x=plot_data['time'], y=plot_data['syn_generation'], mode='lines', name='To Grid', line=dict(color='orange')))
@@ -138,9 +150,9 @@ if len(uploaded_synergy_files) > 0 and len(uploaded_sigenergy_file) > 0:
   ):
     input_date = st.slider(
       "Select a date to view usage line plot",
-      min_value=data['date'].min().date(),
-      max_value=data['date'].max().date(),
-      value=data['date'].min().date(),
+      min_value=data_synergy_halfhour['date'].min().date(),
+      max_value=data_synergy_halfhour['date'].max().date(),
+      value=data_synergy_halfhour['date'].min().date(),
       format="YYYY-MM-DD"
     )
     if input_date:    
@@ -150,26 +162,30 @@ if len(uploaded_synergy_files) > 0 and len(uploaded_sigenergy_file) > 0:
   with st.container(border=True):
     input_date_range = st.date_input(
       "Select a date range to view costs",
-      value=(data_daily['date'].min(), data_daily['date'].max())
+      value=(data_synergy_daily['date'].min(), data_synergy_daily['date'].max())
     )
-    
-    data_daily_filtered = data_daily[
-      (data_daily['date'] >= pd.to_datetime(input_date_range[0])) &
-      (data_daily['date'] <= pd.to_datetime(input_date_range[1]))
+    data_synergy_daily_filtered = data_synergy_daily[
+      (data_synergy_daily['date'] >= pd.to_datetime(input_date_range[0])) &
+      (data_synergy_daily['date'] <= pd.to_datetime(input_date_range[1]))
     ]
 
-    st.write(f"Total Home Plan Costs: **${data_daily_filtered ['home_plan_costs'].sum() / 100:.2f}**")
-    st.write(f"Total Midday Saver Costs: **${data_daily_filtered['midday_saver_costs'].sum() / 100:.2f}**")
-    st.write(f"Total Electric Vehicle Add-On Costs: **${data_daily_filtered['electric_vehicle_add_on_costs'].sum() / 100:.2f}**")
-    st.write(f"Total Feed-In Tariff: **${data_daily_filtered['debs_feed_in_tariff'].sum() / 100:.2f}**")
-    st.write(f"Opportunity Cost from Self-Consumption: **${(data_daily_filtered['self_consumption'] * (32.3719 - 2)).sum() / 100:.2f}**")
+    data_sigenergy_daily_filtered = data_sigenergy_daily[
+      (data_sigenergy_daily['date'] >= pd.to_datetime(input_date_range[0])) &
+      (data_sigenergy_daily['date'] <= pd.to_datetime(input_date_range[1]))
+    ]
+
+    st.write(f"Total Home Plan Costs: **${data_synergy_daily_filtered ['home_plan_costs'].sum() / 100:.2f}**")
+    st.write(f"Total Midday Saver Costs: **${data_synergy_daily_filtered['midday_saver_costs'].sum() / 100:.2f}**")
+    st.write(f"Total Electric Vehicle Add-On Costs: **${data_synergy_daily_filtered['electric_vehicle_add_on_costs'].sum() / 100:.2f}**")
+    st.write(f"Total Feed-In Tariff: **${data_synergy_daily_filtered['debs_feed_in_tariff'].sum() / 100:.2f}**")
+    st.write(f"Opportunity Cost from Self-Consumption: **${(data_sigenergy_daily_filtered['self_consumption'] * (32.3719 - 2)).sum() / 100:.2f}**")
 
     fig_costs = go.Figure()
-    fig_costs.add_trace(go.Scatter(x=data_daily_filtered['date'], y=data_daily_filtered['home_plan_costs'],
+    fig_costs.add_trace(go.Scatter(x=data_synergy_daily_filtered['date'], y=data_synergy_daily_filtered['home_plan_costs'],
                                   name='Home Plan Costs', line=dict(color='blue')))
-    fig_costs.add_trace(go.Scatter(x=data_daily_filtered['date'], y=data_daily_filtered['midday_saver_costs'],
+    fig_costs.add_trace(go.Scatter(x=data_synergy_daily_filtered['date'], y=data_synergy_daily_filtered['midday_saver_costs'],
                                   name='Midday Saver Costs', line=dict(color='orange')))
-    fig_costs.add_trace(go.Scatter(x=data_daily_filtered['date'], y=data_daily_filtered['electric_vehicle_add_on_costs'],
+    fig_costs.add_trace(go.Scatter(x=data_synergy_daily_filtered['date'], y=data_synergy_daily_filtered['electric_vehicle_add_on_costs'],
                                   name='EV Add-On Costs', line=dict(color='green')))
     fig_costs.update_layout(title="Daily Electricity Costs",
                             xaxis_title="Date", yaxis_title="Cost (in currency units)",
@@ -178,14 +194,12 @@ if len(uploaded_synergy_files) > 0 and len(uploaded_sigenergy_file) > 0:
 
     # Use plotly to plot stacked bar chart for from_grid, and self_consumption ####
     fig_usage = go.Figure()
-    fig_usage.add_trace(go.Bar(x=data_daily_filtered['date'], y=data_daily_filtered['from_grid'],
+    fig_usage.add_trace(go.Bar(x=data_sigenergy_daily_filtered['date'], y=data_sigenergy_daily_filtered['from_grid'],
                               name='From Grid', marker_color='blue'))
-    fig_usage.add_trace(go.Bar(x=data_daily_filtered['date'], y=data_daily_filtered['self_consumption'],
+    fig_usage.add_trace(go.Bar(x=data_sigenergy_daily_filtered['date'], y=data_sigenergy_daily_filtered['self_consumption'],
                               name='Self Consumption', marker_color='green'))
-    fig_usage.add_trace(go.Bar(x=data_daily_filtered['date'], y=-data_daily_filtered['to_grid'],
+    fig_usage.add_trace(go.Bar(x=data_sigenergy_daily_filtered['date'], y=-data_sigenergy_daily_filtered['to_grid'],
                               name='To Grid', marker_color='orange'))
-    fig_usage.add_trace(go.Scatter(x=data_daily_filtered['date'], y=[-16]*len(data_daily_filtered),
-                                  name='Battery Max Charge', line=dict(color='red', dash='dash')))
     fig_usage.update_layout(title="Daily Energy Flow",
                             xaxis_title="Date", yaxis_title="Energy (kWh)",
                             barmode='relative', legend=dict(x=0.1, y=0.9), hovermode='x')
@@ -194,23 +208,25 @@ if len(uploaded_synergy_files) > 0 and len(uploaded_sigenergy_file) > 0:
     # Use plotly to plot 100% stacked bar chart for from_grid, and self_consumption ####
     fig_usage_pct = go.Figure()
     fig_usage_pct.add_trace(go.Bar(
-        x=data_daily_filtered['date'],
-        y=(data_daily_filtered['from_grid'] / data_daily_filtered['total_usage']) * 100,
+        x=data_sigenergy_daily_filtered['date'],
+        y=(data_sigenergy_daily_filtered['from_grid'] / data_sigenergy_daily_filtered['total_usage']) * 100,
         name='From Grid', marker_color='blue'))
     fig_usage_pct.add_trace(go.Bar(
-        x=data_daily_filtered['date'],
-        y=(data_daily_filtered['self_consumption'] / data_daily_filtered['total_usage']) * 100,
+        x=data_sigenergy_daily_filtered['date'],
+        y=(data_sigenergy_daily_filtered['self_consumption'] / data_sigenergy_daily_filtered['total_usage']) * 100,
         name='Self Consumption', marker_color='green'))
     fig_usage_pct.update_layout(title="Daily Energy Flow (Percentage)",
                                 xaxis_title="Date", yaxis_title="Percentage (%)",
                                 barmode='relative', legend=dict(x=0.1, y=0.9), hovermode='x')
     st.plotly_chart(fig_usage_pct)
 
+    st.write(f"Average Percentage from Self Consumption: **{data_sigenergy_daily_filtered['self_consumption'].sum() / data_sigenergy_daily_filtered['total_usage'].sum() * 100:.2f}%**")
+
     # Use plotly to plot stacked bar chart for to_grid and self_consumption relative to sig_solar_production ####
     fig_solar = go.Figure()
-    fig_solar.add_trace(go.Bar(x=data_daily_filtered['date'], y=data_daily_filtered['to_grid'],
+    fig_solar.add_trace(go.Bar(x=data_sigenergy_daily_filtered['date'], y=data_sigenergy_daily_filtered['to_grid'],
                               name='To Grid', marker_color='orange'))
-    fig_solar.add_trace(go.Bar(x=data_daily_filtered['date'], y=data_daily_filtered['self_consumption'],
+    fig_solar.add_trace(go.Bar(x=data_sigenergy_daily_filtered['date'], y=data_sigenergy_daily_filtered['self_consumption'],
                               name='Self Consumption', marker_color='green'))
     fig_solar.update_layout(title="Daily Solar Production Flow",
                             xaxis_title="Date", yaxis_title="Energy (kWh)",
@@ -220,21 +236,23 @@ if len(uploaded_synergy_files) > 0 and len(uploaded_sigenergy_file) > 0:
     # Use plotly to plot 100% stacked bar chart for to_grid and self_consumption relative to sig_solar_production ####
     fig_solar_pct = go.Figure()
     fig_solar_pct.add_trace(go.Bar(
-        x=data_daily_filtered['date'],
-        y=(data_daily_filtered['to_grid'] / data_daily_filtered['sig_solar_production']) * 100,
+        x=data_sigenergy_daily_filtered['date'],
+        y=(data_sigenergy_daily_filtered['to_grid'] / data_sigenergy_daily_filtered['sig_solar_production']) * 100,
         name='To Grid', marker_color='orange'))
     fig_solar_pct.add_trace(go.Bar(
-        x=data_daily_filtered['date'],
-        y=(data_daily_filtered['self_consumption'] / data_daily_filtered['sig_solar_production']) * 100,
+        x=data_sigenergy_daily_filtered['date'],
+        y=((data_sigenergy_daily_filtered['sig_solar_production'] - data_sigenergy_daily_filtered['to_grid']) / data_sigenergy_daily_filtered['sig_solar_production']) * 100,
         name='Self Consumption', marker_color='green'))
     fig_solar_pct.update_layout(title="Daily Solar Production Flow (Percentage)",
                                 xaxis_title="Date", yaxis_title="Percentage (%)",
                                 barmode='relative', legend=dict(x=0.1, y=0.9), hovermode='x')
     st.plotly_chart(fig_solar_pct)
+        
+    st.write(f"Average Percentage to Self Consumption: **{data_sigenergy_daily_filtered['self_consumption'].sum() / data_sigenergy_daily_filtered['sig_solar_production'].sum() * 100:.2f}%**")
 
     # Use plotly to plot bar chart of to_grid ####
     fig_to_grid = go.Figure()
-    fig_to_grid.add_trace(go.Bar(x=data_daily_filtered['date'], y=data_daily_filtered['to_grid'],
+    fig_to_grid.add_trace(go.Bar(x=data_sigenergy_daily_filtered['date'], y=data_sigenergy_daily_filtered['to_grid'],
                                 name='To Grid', marker_color='orange'))
     fig_to_grid.update_layout(title="Daily Energy Sent to Grid",
                               xaxis_title="Date", yaxis_title="Energy (kWh)",
